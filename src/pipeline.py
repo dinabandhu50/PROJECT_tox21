@@ -13,5 +13,5 @@ from sklearn import decomposition
 
 
 pipe0 = Pipeline([
-    ('pca', decomposition.PCA(n_components=600)),
+    ('pca', decomposition.PCA(n_components=800)),
 ])

@@ -6,8 +6,8 @@ from sklearn.multioutput import MultiOutputClassifier
 
 # parameters
 rf_param = {
-    'max_depth': 10, 
-    'n_estimators': 102, 
+    'max_depth': 11, 
+    'n_estimators': 165, 
     'criterion': 'gini'
     }
 xgb_param = {

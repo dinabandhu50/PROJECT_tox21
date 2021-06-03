@@ -1,15 +1,17 @@
 import os
-import numpy as np
 import config
 import joblib
+import optuna
 import logging
 import pandas as pd
+import numpy as np
 from pipeline import pipe0
-import model_dispatcher
+from sklearn.ensemble import RandomForestClassifier
 
 from sklearn import metrics
 
-def run_training(fold,model_name):
+
+def run_training(fold,model_name,param):
     df_features = pd.read_csv(config.TRAIN_FEATURES)
     df_targets = pd.read_csv(config.TRAIN_LABEL_FOLDS)
 
@@ -40,16 +42,16 @@ def run_training(fold,model_name):
 
     # initialize classification model
     # clf = MultiOutputClassifier(model_dispatcher.models[model_name])
-    clf = model_dispatcher.models[model_name]
+    model = RandomForestClassifier(**param)
 
     # fit model on training data
-    clf.fit(xtrain, ytrain)
+    model.fit(xtrain, ytrain)
     # predict on validation data
     # we need the probability values as we are calculating AUC
     # we will use the probability of 1s
-    valid_preds_proba = clf.predict_proba(xvalid)
+    valid_preds_proba = model.predict_proba(xvalid)
     valid_preds_proba = np.array(valid_preds_proba)[:, :, 1].T
-    valid_preds = clf.predict(xvalid)
+    valid_preds = model.predict(xvalid)
 
     # get roc auc score
     auc = metrics.roc_auc_score(yvalid, valid_preds_proba)
@@ -61,32 +63,51 @@ def run_training(fold,model_name):
     js = metrics.jaccard_score(yvalid,valid_preds,average='samples')
     # printing and logging
     print(f'fold={fold}, n_pca={xvalid.shape[1]}, auc={auc:.7f}, f1={f1:.7f}, logloss={lloss:.7f}, js={js:.7f}')
-    logging.basicConfig(
-        filename=os.path.join(config.ROOT_PATH,"logs",f"{model_name}_base.log"),
-        filemode='a',
-        level=logging.INFO)
-    logging.info(f'fold={fold}, n_pca={xvalid.shape[1]}, auc={auc:.7f}, f1={f1:.7f}, logloss={lloss:.7f}, js={js:.7f}')
-    
-    # # save the model
-    # joblib.dump(pipe0,os.path.join(config.PIPE, f"pipe0_{fold}.bin"))
-    joblib.dump(clf,os.path.join(config.MODEL, f"{model_name}_{fold}.bin"))
-    
-    result_df = pd.concat(
-        [valid_df[["id","kfold"] + target_columns],
-        pd.DataFrame(valid_preds,columns=target_columns).add_suffix(f'_{model_name}_pred')],
-        axis=1
-        )
-    return result_df
+
+    return auc
 
 
-def model_evaluation(model_name):
-    df_features = pd.read_csv(config.TEST_FEATURES)
-    df_targets = pd.read_csv(config.TEST_TARGETS)
+def objective(trial):
+    param = {
+        "max_depth" : trial.suggest_int("max_depth", 2, 32),
+        "n_estimators" : trial.suggest_int("n_estimators", 10, 200),
+        "criterion": trial.suggest_categorical("criterion",["gini", "entropy"]),
+        # "max_features" : trial.suggest_categorical("max_features",["auto", "sqrt", "log2"]),
+    }
+    param["n_jobs"] = -1
+    all_aucs = []
+    for f in range(5):
+        temp_auc = run_training(fold=f,model_name="rf",param=param)
+        all_aucs.append(temp_auc)
+
+    return np.mean(all_aucs)
+
+
+def predict(model_name="mdoel"):
+    df_test = pd.read_csv(config.TEST_DATA)
+    ss = pd.read_csv(config.SAMPLE_SUB)
+    # feature colymns
+    features = [
+    f for f in df_test.columns if f not in ("ID")
+    ]
+    
+    fold = 0
+    pipe0 = joblib.load(os.path.join(config.PIPE, f"pipe_{fold}.bin"))
+    model = joblib.load(os.path.join(config.MODEL, f"rf_{fold}.bin"))
+
+    xtest = pipe0.transform(df_test[features])
+    ytest = model.predict(xtest)
+
+    ss["Is_Lead"] = ytest
+    ss.to_csv(os.path.join(config.SUB,f"submission_{model_name}_{fold}.csv"),index=False)
 
 
 if __name__ == '__main__':
-    # model_name = "rf"
-    model_name = "xgb"
-    # model_name = "cat"
-    for f in range(5):
-        run_training(fold=f,model_name=model_name)
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=10)
+
+    print("best trials:")
+    trial_ = study.best_trial
+
+    print(trial_.values) 
+    print(trial_.params) 
