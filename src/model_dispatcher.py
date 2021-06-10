@@ -26,7 +26,8 @@ xgb_param = {
     }
 cat_param = {
     "iterations":100,
-    "learning_rate":1,
+    "learning_rate":0.1,
+    # "loss_function":
     "task_type":"GPU",
     "devices":'0:1',
     "depth":2,
@@ -37,5 +38,5 @@ cat_param = {
 models = {
     "rf": ensemble.RandomForestClassifier(**rf_param),
     "xgb":MultiOutputClassifier(XGBClassifier(**xgb_param)),
-    "cat":CatBoostClassifier(**cat_param),
+    "cat":MultiOutputClassifier(CatBoostClassifier(**cat_param)),
 }
